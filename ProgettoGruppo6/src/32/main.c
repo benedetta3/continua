@@ -93,6 +93,68 @@ int main(int argc, char** argv) {
     
     params* input = malloc(sizeof(params));
     input->DS = load_data(dsfilename, &input->N, &input->D);
+		// ============================================================
+	// Validazione ROBUSTA dei parametri
+	printf("=== VALIDAZIONE PARAMETRI ===\n");
+	printf("Dataset: N=%d, D=%d\n", input->N, input->D);
+	printf("Query: nq=%d\n", input->nq);
+	printf("Richiesti: h=%d, k=%d, x=%d\n", h, k, x);
+
+	// 1. Verifica h (numero pivot)
+	if(h <= 0) {
+		printf("ERRORE: h=%d deve essere positivo (h > 0)\n", h);
+		exit(1);
+	}
+	if(h > input->N) {
+		printf("ERRORE: h=%d non può essere maggiore di N=%d\n", h, input->N);
+		exit(1);
+	}
+
+	// 2. Verifica k (numero vicini)
+	if(k <= 0) {
+		printf("ERRORE: k=%d deve essere positivo (k > 0)\n", k);
+		exit(1);
+	}
+	if(k > input->N) {
+		printf("ERRORE: k=%d non può essere maggiore di N=%d\n", k, input->N);
+		printf("Suggerimento: usa k <= N\n");
+		exit(1);
+	}
+
+	// 3. Verifica x (parametro quantizzazione)
+	if(x <= 0) {
+		printf("ERRORE: x=%d deve essere positivo (x > 0)\n", x);
+		exit(1);
+	}
+	if(x > input->D) {
+		printf("WARNING: x=%d > D=%d, verrà limitato a x=D\n", x, input->D);
+		x = input->D;
+	}
+
+	// 4. Verifica dimensioni minime
+	if(input->D < 1) {
+		printf("ERRORE: D=%d deve essere almeno 1\n", input->D);
+		exit(1);
+	}
+	if(input->N < 2) {
+		printf("ERRORE: N=%d deve essere almeno 2\n", input->N);
+		exit(1);
+	}
+	if(input->nq < 1) {
+		printf("ERRORE: nq=%d deve essere almeno 1\n", input->nq);
+		exit(1);
+	}
+
+	// 5. Verifica compatibilità query
+	if(input->nq > 0) {
+		// La dimensione delle query viene verificata automaticamente nel load
+		printf("Validazione completata con successo\n\n");
+	}
+
+	// Inizializza flag per fit (SE NON ANCORA FATTO)
+	input->first_fit_call = false;
+
+	// RESTO DEL CODICE INVARIATO...
     input->Q = load_data(queryfilename, &input->nq, &input->D);
     
     // ========== AGGIUNGI SOLO QUESTO BLOCCO ==========

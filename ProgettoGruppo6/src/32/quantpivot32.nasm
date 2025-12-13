@@ -6,21 +6,32 @@ global euclidean_distance_asm
 global compute_lower_bound_asm
 
 ; ============================================================
-; approx_distance_asm - VERSIONE ULTRA OTTIMIZZATA
+; approx_distance_asm - VERSIONE PRODUCTION READY
 ;   RDI = vplus
 ;   RSI = vminus
 ;   RDX = wplus
 ;   RCX = wminus
 ;   R8D = D
 ;
-; NOVITÀ: Unrolling ×4 → 16 float/iterazione
+; OTTIMIZZAZIONI:
+;   - Unrolling x4 (16 float/iterazione)
+;   - MOVUPS per sicurezza (funziona anche con dati non allineati)
+;   - Prefetching aggressivo
+;   - Gestione robusta remainder (16 -> 8 -> 4 -> 1)
+;
+; Ritorno in XMM0 (float)
 ; ============================================================
 
 approx_distance_asm:
+    ; Reset accumulatori
     xorps xmm0, xmm0        ; sum_pp
     xorps xmm1, xmm1        ; sum_mm
     xorps xmm2, xmm2        ; sum_pm
     xorps xmm3, xmm3        ; sum_mp
+
+    ; Test edge case
+    test r8d, r8d
+    jz .return_zero
 
     ; ----------------------------------------
     ; Loop principale: 16 float/iterazione
@@ -36,13 +47,13 @@ approx_distance_asm:
     prefetchnta [rdx + 256]
     prefetchnta [rcx + 256]
 
-    ; ==== BLOCCO 1 (0-3) ====
-    movaps xmm4, [rdi]
-    movaps xmm5, [rsi]
-    movaps xmm6, [rdx]
-    movaps xmm7, [rcx]
+    ; ==== BLOCCO 1 (0-3) - MOVUPS per sicurezza ====
+    movups xmm4, [rdi]      ; SAFE: funziona anche se non allineato
+    movups xmm5, [rsi]
+    movups xmm6, [rdx]
+    movups xmm7, [rcx]
 
-    movaps xmm8, xmm4
+    movaps xmm8, xmm4       ; register-to-register (veloce)
     mulps  xmm8, xmm6
     addps  xmm0, xmm8
 
@@ -59,10 +70,10 @@ approx_distance_asm:
     addps  xmm3, xmm8
 
     ; ==== BLOCCO 2 (4-7) ====
-    movaps xmm4, [rdi + 16]
-    movaps xmm5, [rsi + 16]
-    movaps xmm6, [rdx + 16]
-    movaps xmm7, [rcx + 16]
+    movups xmm4, [rdi + 16]
+    movups xmm5, [rsi + 16]
+    movups xmm6, [rdx + 16]
+    movups xmm7, [rcx + 16]
 
     movaps xmm8, xmm4
     mulps  xmm8, xmm6
@@ -81,10 +92,10 @@ approx_distance_asm:
     addps  xmm3, xmm8
 
     ; ==== BLOCCO 3 (8-11) ====
-    movaps xmm4, [rdi + 32]
-    movaps xmm5, [rsi + 32]
-    movaps xmm6, [rdx + 32]
-    movaps xmm7, [rcx + 32]
+    movups xmm4, [rdi + 32]
+    movups xmm5, [rsi + 32]
+    movups xmm6, [rdx + 32]
+    movups xmm7, [rcx + 32]
 
     movaps xmm8, xmm4
     mulps  xmm8, xmm6
@@ -103,10 +114,10 @@ approx_distance_asm:
     addps  xmm3, xmm8
 
     ; ==== BLOCCO 4 (12-15) ====
-    movaps xmm4, [rdi + 48]
-    movaps xmm5, [rsi + 48]
-    movaps xmm6, [rdx + 48]
-    movaps xmm7, [rcx + 48]
+    movups xmm4, [rdi + 48]
+    movups xmm5, [rsi + 48]
+    movups xmm6, [rdx + 48]
+    movups xmm7, [rcx + 48]
 
     movaps xmm8, xmm4
     mulps  xmm8, xmm6
@@ -143,10 +154,10 @@ approx_distance_asm:
     jz .check4
 
 .main_loop8:
-    movaps xmm4, [rdi]
-    movaps xmm5, [rsi]
-    movaps xmm6, [rdx]
-    movaps xmm7, [rcx]
+    movups xmm4, [rdi]
+    movups xmm5, [rsi]
+    movups xmm6, [rdx]
+    movups xmm7, [rcx]
 
     movaps xmm8, xmm4
     mulps  xmm8, xmm6
@@ -164,10 +175,10 @@ approx_distance_asm:
     mulps  xmm8, xmm6
     addps  xmm3, xmm8
 
-    movaps xmm4, [rdi + 16]
-    movaps xmm5, [rsi + 16]
-    movaps xmm6, [rdx + 16]
-    movaps xmm7, [rcx + 16]
+    movups xmm4, [rdi + 16]
+    movups xmm5, [rsi + 16]
+    movups xmm6, [rdx + 16]
+    movups xmm7, [rcx + 16]
 
     movaps xmm8, xmm4
     mulps  xmm8, xmm6
@@ -200,10 +211,10 @@ approx_distance_asm:
     jz .check1
 
 .main_loop4:
-    movaps xmm4, [rdi]
-    movaps xmm5, [rsi]
-    movaps xmm6, [rdx]
-    movaps xmm7, [rcx]
+    movups xmm4, [rdi]
+    movups xmm5, [rsi]
+    movups xmm6, [rdx]
+    movups xmm7, [rcx]
 
     movaps xmm8, xmm4
     mulps xmm8, xmm6
@@ -265,9 +276,10 @@ approx_distance_asm:
     jnz .remainder_loop
 
 ; ============================================================
-; RIDUZIONE
+; RIDUZIONE ORIZZONTALE
 ; ============================================================
 .reduce_all:
+    ; sum_pp -> xmm0
     movaps xmm8, xmm0
     shufps xmm8, xmm8, 0x4E
     addps  xmm0, xmm8
@@ -275,6 +287,7 @@ approx_distance_asm:
     shufps xmm8, xmm8, 0xB1
     addps  xmm0, xmm8
 
+    ; sum_mm -> xmm1
     movaps xmm8, xmm1
     shufps xmm8, xmm8, 0x4E
     addps  xmm1, xmm8
@@ -282,6 +295,7 @@ approx_distance_asm:
     shufps xmm8, xmm8, 0xB1
     addps  xmm1, xmm8
 
+    ; sum_pm -> xmm2
     movaps xmm8, xmm2
     shufps xmm8, xmm8, 0x4E
     addps  xmm2, xmm8
@@ -289,6 +303,7 @@ approx_distance_asm:
     shufps xmm8, xmm8, 0xB1
     addps  xmm2, xmm8
 
+    ; sum_mp -> xmm3
     movaps xmm8, xmm3
     shufps xmm8, xmm8, 0x4E
     addps  xmm3, xmm8
@@ -296,24 +311,34 @@ approx_distance_asm:
     shufps xmm8, xmm8, 0xB1
     addps  xmm3, xmm8
 
+    ; Risultato finale
     addss xmm0, xmm1
     addss xmm2, xmm3
     subss xmm0, xmm2
 
+.return_zero:
     ret
 
 
 ; ============================================================
-; euclidean_distance_asm - VERSIONE ULTRA OTTIMIZZATA
+; euclidean_distance_asm - VERSIONE PRODUCTION READY
 ;   RDI = v
 ;   RSI = w
 ;   EDX = D
 ;
-; NOVITÀ: Unrolling ×4 → 16 float/iterazione
+; OTTIMIZZAZIONI:
+;   - Unrolling x4 (16 float/iterazione)
+;   - MOVUPS per sicurezza
+;   - Prefetching
+;   - Sqrt finale ottimizzata
 ; ============================================================
 
 euclidean_distance_asm:
     xorps xmm0, xmm0        ; sum_sq = 0
+
+    ; Test edge case
+    test edx, edx
+    jz .return_zero
 
     ; ----------------------------------------
     ; Loop principale: 16 float/iterazione
@@ -326,30 +351,30 @@ euclidean_distance_asm:
     prefetchnta [rdi + 256]
     prefetchnta [rsi + 256]
 
-    ; Blocco 1
-    movaps xmm1, [rdi]
-    movaps xmm2, [rsi]
+    ; Blocco 1 - MOVUPS per sicurezza
+    movups xmm1, [rdi]
+    movups xmm2, [rsi]
     subps  xmm1, xmm2
     mulps  xmm1, xmm1
     addps  xmm0, xmm1
 
     ; Blocco 2
-    movaps xmm1, [rdi + 16]
-    movaps xmm2, [rsi + 16]
+    movups xmm1, [rdi + 16]
+    movups xmm2, [rsi + 16]
     subps  xmm1, xmm2
     mulps  xmm1, xmm1
     addps  xmm0, xmm1
 
     ; Blocco 3
-    movaps xmm1, [rdi + 32]
-    movaps xmm2, [rsi + 32]
+    movups xmm1, [rdi + 32]
+    movups xmm2, [rsi + 32]
     subps  xmm1, xmm2
     mulps  xmm1, xmm1
     addps  xmm0, xmm1
 
     ; Blocco 4
-    movaps xmm1, [rdi + 48]
-    movaps xmm2, [rsi + 48]
+    movups xmm1, [rdi + 48]
+    movups xmm2, [rsi + 48]
     subps  xmm1, xmm2
     mulps  xmm1, xmm1
     addps  xmm0, xmm1
@@ -370,14 +395,14 @@ euclidean_distance_asm:
     jz .check4
 
 .main_loop8:
-    movaps xmm1, [rdi]
-    movaps xmm2, [rsi]
+    movups xmm1, [rdi]
+    movups xmm2, [rsi]
     subps  xmm1, xmm2
     mulps  xmm1, xmm1
     addps  xmm0, xmm1
 
-    movaps xmm1, [rdi + 16]
-    movaps xmm2, [rsi + 16]
+    movups xmm1, [rdi + 16]
+    movups xmm2, [rsi + 16]
     subps  xmm1, xmm2
     mulps  xmm1, xmm1
     addps  xmm0, xmm1
@@ -395,8 +420,8 @@ euclidean_distance_asm:
     jz .check1
 
 .main_loop4:
-    movaps xmm1, [rdi]
-    movaps xmm2, [rsi]
+    movups xmm1, [rdi]
+    movups xmm2, [rsi]
     subps  xmm1, xmm2
     mulps  xmm1, xmm1
     addps  xmm0, xmm1
@@ -429,6 +454,7 @@ euclidean_distance_asm:
 ; RIDUZIONE E SQRT
 ; ============================================================
 .reduce:
+    ; Riduzione orizzontale
     movaps xmm1, xmm0
     shufps xmm1, xmm1, 0x4E
     addps  xmm0, xmm1
@@ -437,27 +463,31 @@ euclidean_distance_asm:
     shufps xmm1, xmm1, 0xB1
     addps  xmm0, xmm1
 
+    ; Sqrt finale
     sqrtss xmm0, xmm0
+
+.return_zero:
     ret
 
 
 ; ============================================================
-; compute_lower_bound_asm
-;   RDI = idx_v (array di h float: distanze pre-calcolate)
-;   RSI = qpivot (array di h float: distanze query-pivot)
-;   EDX = h (numero di pivot)
+; compute_lower_bound_asm - VERSIONE PRODUCTION READY
+;   RDI = idx_v (array di h float)
+;   RSI = qpivot (array di h float)
+;   EDX = h
 ;
 ; Calcola: LB = max_j |idx_v[j] - qpivot[j]|
-;
-; Ottimizzazioni SSE: elabora 4 float alla volta
-; Ritorno in XMM0 (float)
 ; ============================================================
 
 compute_lower_bound_asm:
-    ; Maschera per valore assoluto (azzera bit di segno)
+    ; Test edge case
+    test edx, edx
+    jz .return_zero
+
+    ; Maschera per valore assoluto
     mov rax, 0x7FFFFFFF
     movd xmm7, eax
-    shufps xmm7, xmm7, 0    ; xmm7 = [mask, mask, mask, mask]
+    shufps xmm7, xmm7, 0    ; [mask, mask, mask, mask]
 
     xorps xmm0, xmm0        ; max_LB = 0
 
@@ -469,9 +499,9 @@ compute_lower_bound_asm:
     jz .check1
 
 .main_loop4:
-    movaps xmm1, [rdi]      ; idx_v[j..j+3]
-    movaps xmm2, [rsi]      ; qpivot[j..j+3]
-    subps  xmm1, xmm2       ; diff = idx_v - qpivot
+    movups xmm1, [rdi]      ; SAFE: movups
+    movups xmm2, [rsi]
+    subps  xmm1, xmm2       ; diff
     andps  xmm1, xmm7       ; |diff|
     maxps  xmm0, xmm1       ; max element-wise
 
@@ -503,16 +533,16 @@ compute_lower_bound_asm:
     jnz .remainder_loop
 
 ; ============================================================
-; RIDUZIONE ORIZZONTALE PER TROVARE IL MASSIMO
+; RIDUZIONE ORIZZONTALE (trova max)
 ; ============================================================
 .reduce:
-    ; xmm0 = [a, b, c, d]
     movaps xmm1, xmm0
-    shufps xmm1, xmm1, 0x4E ; xmm1 = [c, d, a, b]
-    maxps  xmm0, xmm1       ; xmm0 = [max(a,c), max(b,d), ...]
+    shufps xmm1, xmm1, 0x4E
+    maxps  xmm0, xmm1
     
     movaps xmm1, xmm0
-    shufps xmm1, xmm1, 0xB1 ; xmm1 = [max(b,d), max(a,c), ...]
-    maxss  xmm0, xmm1       ; xmm0[0] = max di tutto
+    shufps xmm1, xmm1, 0xB1
+    maxss  xmm0, xmm1
 
+.return_zero:
     ret
