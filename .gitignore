@@ -1,0 +1,32 @@
+# Build artifacts
+*.o
+*.so
+*.pyc
+build/
+__pycache__/
+*.egg-info/
+dist/
+
+# Executables
+quantpivot
+main
+
+# Python
+venv/
+env/
+.venv/
+
+# Datasets
+*.ds
+*.dsz
+*.dst
+*.bin
+*.dat
+
+# Results
+results/
+benchmark/
+
+# Editor
+.vscode/
+*.swp
