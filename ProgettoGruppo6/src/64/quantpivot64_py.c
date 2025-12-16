@@ -36,6 +36,10 @@ static void QuantPivot64_dealloc(QuantPivot64Object *self) {
 
     if (self->input->ds_plus != NULL) _mm_free(self->input->ds_plus);
     if (self->input->ds_minus != NULL) _mm_free(self->input->ds_minus);
+    
+    // Libera buffer allineati DS e Q (allocati internamente)
+    if (self->input->DS != NULL) _mm_free(self->input->DS);
+    if (self->input->Q != NULL) _mm_free(self->input->Q);
 
 	// Decrementa riferimenti agli array NumPy
 	Py_XDECREF(self->DS_array);
@@ -104,19 +108,21 @@ static PyObject* QuantPivot64_fit(QuantPivot64Object *self, PyObject *args, PyOb
 		return NULL;
 	}
 
-	// Verifica che siano array contigui
-	type* dataset = (type*)(PyArrayObject*)PyArray_DATA(ds_array);
+	// Estrai dimensioni PRIMA di allocare
+	self->input->N = (int)PyArray_DIM(ds_array, 0);
+	self->input->D = (int)PyArray_DIM(ds_array, 1);
 
-	uintptr_t addr = (uintptr_t)dataset;
-	int is_aligned = (addr % align == 0);
-
-	if(!is_aligned){
-		PyErr_SetString(PyExc_ValueError, "Input array (DS) not aligned");
+	// Copia dati in buffer allineato (AVX richiede 32-byte alignment)
+	type* src_data = (type*)PyArray_DATA(ds_array);
+	size_t ds_size = (size_t)self->input->N * (size_t)self->input->D * sizeof(type);
+	type* dataset = (type*)_mm_malloc(ds_size, align);
+	if (!dataset) {
+		PyErr_NoMemory();
 		return NULL;
 	}
+	memcpy(dataset, src_data, ds_size);
 
-	// Estrai dimensioni
-	self->input->N = (int)PyArray_DIM(ds_array, 0);
+	// Nota: N e D già estratti sopra
 	self->input->D = (int)PyArray_DIM(ds_array, 1);
 
 	if (h <= 0 || h > self->input->N) {
@@ -185,18 +191,6 @@ static PyObject* QuantPivot64_predict(QuantPivot64Object *self, PyObject *args, 
 		return NULL;
 	}
 
-	// Verifica che siano array contigui
-	type* query = (type*)(PyArrayObject*)PyArray_DATA(query_array);
-	uintptr_t addr = (uintptr_t)query;
-	int is_aligned = (addr % align == 0);
-
-	if(!is_aligned){
-		PyErr_SetString(PyExc_ValueError, "Query array (Q) not aligned");
-		return NULL;
-	}
-
-	self->input->Q = query;
-
 	// Estrai dimensioni
 	self->input->nq = (int)PyArray_DIM(query_array, 0);
 
@@ -205,6 +199,18 @@ static PyObject* QuantPivot64_predict(QuantPivot64Object *self, PyObject *args, 
 		PyErr_SetString(PyExc_ValueError, "Query dimensionality must match dataset D");
 		return NULL;
 	}
+
+	// Copia query in buffer allineato (AVX richiede 32-byte alignment)
+	type* src_query = (type*)PyArray_DATA(query_array);
+	size_t q_size = (size_t)self->input->nq * (size_t)self->input->D * sizeof(type);
+	type* query = (type*)_mm_malloc(q_size, align);
+	if (!query) {
+		PyErr_NoMemory();
+		return NULL;
+	}
+	memcpy(query, src_query, q_size);
+
+	self->input->Q = query;
 
 	if (k <= 0 || k > self->input->N) {
 		PyErr_SetString(PyExc_ValueError, "k must be in [1..N]");
